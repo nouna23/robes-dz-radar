@@ -1,0 +1,143 @@
+generator client {
+  provider = "prisma-client"
+  output   = "../app/generated/prisma"
+}
+
+datasource db {
+  provider = "postgresql"
+  // url vient de prisma7.config.ts (DIRECT_URL, CLI uniquement) — pas d'url ici
+}
+
+enum ProblemStatus {
+  NEW
+  WATCHING
+  INVESTIGATING
+  TESTING
+  TESTED
+  ABANDONED
+  ARCHIVED_LOW_MOMENTUM
+}
+
+enum ListingPlatform {
+  ETSY
+  WEB // découvert via recherche Tavily sur le site propre d'une boutique
+}
+
+enum ListingStatus {
+  ACTIVE
+  SOLD_OUT
+  REMOVED // absent depuis N runs consécutifs — proxy de "vendu"/arrêté
+  UNKNOWN // collecté une fois, statut pas encore reconfirmé
+}
+
+model Source {
+  id          String    @id @default(cuid())
+  platform    String
+  sourceName  String
+  url         String    @unique
+  author      String?
+  publishedAt DateTime?
+  collectedAt DateTime  @default(now())
+  rawContent  String
+  signals     Signal[]
+
+  @@index([platform])
+  @@index([collectedAt])
+}
+
+model Signal {
+  id                     String   @id @default(cuid())
+  sourceId               String
+  source                 Source   @relation(fields: [sourceId], references: [id])
+  rawText                String
+  isProblem              Boolean  @default(true)
+  problemId              String?
+  problem                Problem? @relation(fields: [problemId], references: [id])
+  targetAudience         String?
+  sentiment               String?
+  intensity              Int? // 1-5, estimé par le LLM
+  categories              String[]
+  timeLostMentioned      Boolean  @default(false)
+  moneyLostMentioned     Boolean  @default(false)
+  existingToolsMentioned String[] // boutiques/marques/marketplaces déjà essayées
+  activeSearchIndicator  Boolean  @default(false)
+  willingnessToPay       Boolean  @default(false)
+  aiRelevance            Boolean?
+  claims                 Json // [{field, value, claimType: EXPLICIT|INFERRED|HYPOTHESIS}]
+  llmProvider            String?
+  detectedAt             DateTime @default(now())
+
+  @@index([problemId])
+}
+
+model Problem {
+  id                 String        @id @default(cuid())
+  title              String
+  description        String
+  category           String?
+  targetAudience     String?
+  firstSeenAt        DateTime      @default(now())
+  lastSeenAt         DateTime      @default(now())
+  signals            Signal[]
+  trendKeyword       String?
+  trendTimeline      Json? // compact [{date, value}]
+  trendChangePercent Float?
+  trendCheckedAt     DateTime?
+  contentBrief       ContentBrief?
+  status             ProblemStatus @default(NEW)
+}
+
+model ContentBrief {
+  id             String   @id @default(cuid())
+  problemId      String   @unique
+  problem        Problem  @relation(fields: [problemId], references: [id])
+  title          String
+  angle          String
+  outline        Json // string[]
+  quotes         Json // [{text, sourceUrl}]
+  targetAudience String?
+  status         String   @default("draft")
+  createdAt      DateTime @default(now())
+}
+
+/// Boutique, shop Etsy, ou créatrice indépendante vendant des robes algériennes.
+model Seller {
+  id          String          @id @default(cuid())
+  platform    ListingPlatform
+  name        String
+  url         String?
+  externalId  String? // Etsy shop_id si platform = ETSY ; null pour WEB
+  country     String?
+  firstSeenAt DateTime        @default(now())
+  lastSeenAt  DateTime        @default(now())
+  listings    Listing[]
+
+  @@unique([platform, externalId])
+  @@index([platform])
+}
+
+/// Une annonce produit (Etsy) ou une page produit découverte (recherche web).
+model Listing {
+  id            String          @id @default(cuid())
+  sellerId      String
+  seller        Seller          @relation(fields: [sellerId], references: [id])
+  platform      ListingPlatform
+  externalId    String? // Etsy listing_id si platform = ETSY ; null pour WEB
+  url           String          @unique
+  title         String
+  garmentTags   String[] // karakou, gandoura, blouza, caftan, djellaba, moderne, ...
+  priceAmount   Decimal?        @db.Decimal(10, 2)
+  currency      String?
+  priceHistory  Json            @default("[]") // [{date, amount, currency}], append au changement
+  status        ListingStatus   @default(UNKNOWN)
+  statusHistory Json            @default("[]") // [{date, status}], append au changement
+  missedRuns    Int             @default(0) // debounce avant de marquer REMOVED
+  rawData       Json?
+  firstSeenAt   DateTime        @default(now())
+  lastSeenAt    DateTime        @default(now())
+  collectedAt   DateTime        @default(now())
+
+  @@index([sellerId])
+  @@index([platform])
+  @@index([status])
+}

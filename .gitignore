@@ -39,3 +39,11 @@ yarn-error.log*
 # typescript
 *.tsbuildinfo
 next-env.d.ts
+
+/app/generated/prisma
+
+# doc de référence générées par `prisma init` (agents/skills), pas du code projet
+/.agents
+/.claude/skills
+/.windsurf
+/skills-lock.json
